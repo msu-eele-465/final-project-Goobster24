@@ -35,10 +35,13 @@ My slaves will be the Adafruit featherwing OLED, the Adafruit PA1010D GPS tracke
 
 Discuss, at a high level, a concept of how your code will work. Include a *high-level* flowchart. This is a high-level concept that should concisely communicate the project's concept.
 
+The MSP430 will be constantly polling each device to gather data from it in a round-robin fashion. One at a time, the MSP430 will poll the input device and gather the data from it. In the case of the climatic/locational/temporal data, this is relatively straight forward, as each value (temperature, coordinates, etc.), can be assigned their own buffer. In the case of the ESP32, the MSP430 will only poll it when requested by the user, as this operation takes longer and is also through an API which limits the amount of times a device can query it. This information will be processed into appropriate buffers. Onto outputs, the buzzer is relatively simple. Comparing the current time to the time selected by the user, the buzzer will be activated by the MSP over PWM. Furthmore, the display will function with the MSP constantly writing to it over I2C, sending over only the relevant information depending on which page the user has selected.
+
+
+
 ## Testing Procedure
 
-Briefly describe how you will test and verify that your project is a success. Think about how you will *demo* the final project. If you need extra equipment for the demo, be sure that you can either bring the equipment or convincingly simulate it. For example, if you want to build a system that uses CAN bus to interface with your car, you won't be able to bring your car into Cobleigh for the demo...
-
+I plan on demonstrating each feature of my watch. First, I'll demonstrate the main time/date display of the watch, which arguably is the most important. I'll demonstrate the ability of the watch to set the current time (like for daylight saving, new timezone, etc.), the date, and the alarm functionality. Next I'll move on to the climatic data the watch can read, displaying the temperature, humidity, and barometric data, and if necessary moving between rooms or inside/outside to show it changing to local conditions. Finally, I'll demonstrate the forecast capability of the watch, switching between daily and weekly forecasts. This will require me to connect to the school's wifi ahead of time by manually programming the Arduino, as finding a way to implement this into the actual project would be rather difficult and take away from the main point of it, but shouldn't be a problem.
 
 ## Prescaler
 
