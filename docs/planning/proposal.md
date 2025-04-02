@@ -38,6 +38,8 @@ Discuss, at a high level, a concept of how your code will work. Include a *high-
 
 The MSP430 will constantly poll devices over I2C depending on which mode the watch is in. It will constantly poll the RTC over I2C to keep its internal time updated for display. Furthermore, in utility mode the GPS and temp/humidity will be polled over I2C. When the user enters forecast mode, the ESP32 will be polled to get relevant daily/weeky forecast data over I2C. The MSP430 will also be reading the three input buttons from the OLED at all times, asynchronously in order to change mdoe/settings. The MSP430 will constantly be outputting to the OLED display whichever data is affiliated with the mode its in. Finally, the MSP430 will activate the buzzer when the set time is reached, stopping only when disabled by button press. The following diagram helps explain this better. Attached is also a state machine which explains the different states the watch is in, and how the three buttons control what is displayed as well as settings.
 
+![Code Diagram](Final_Code_Flowchart.drawio.png)
+
 
 
 ## Testing Procedure
