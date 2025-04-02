@@ -30,7 +30,7 @@ What hardware will you require? Provide a conceptual circuit diagram and/or bloc
 
 I will require the MSP430FR2310, The ESP32, The Adafruit OLED 128X64 Display, the Adafruit AHT20 Temperature/Humidity Module, the Adafruit PA1010D gps module, the DS3231 RTC, and finally the buzzer. It should be noted that the DS3231 RTC has a battery holder, so it will be what supplies the system via a 3 volt coin cell battery.
 
-![Circuit Diagram](Final_Project_Diagram.drawio)
+![Circuit Diagram](Final_Project_Diagram.drawio.png)
 
 ## Software overview
 
