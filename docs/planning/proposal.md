@@ -16,9 +16,9 @@ For my display, I will be using an AdaFruit OLED 128x64 display which has three 
 
 For GPS coordinates and altitude, I'll likely employ an Adafruit PA1010D which is capable of automatically polling GPS sattelites when requested and returning both coordinate and altitude data. This will communicate with the main microcontroller, who will then process and display the data to the display. This will be done over I2C.
 
-Similarly, with an Adafruit BME 688 temperature/humidity module, I'll be able to poll local (that is, wherever the device is) temperature, which will be returned to the microcontroller for processing and display. Too, the module I will have a humidity sensor as well, so it can return local humidity to the microcontroller for procesing and display. Finally, I'll be able to read local barometric pressure. This will be over I2C.
+Similarly, with an Adafruit AHT20 temperature/humidity module, I'll be able to poll local (that is, wherever the device is) temperature, which will be returned to the microcontroller for processing and display. Too, the module I will have a humidity sensor as well, so it can return local humidity to the microcontroller for procesing and display. This will be over I2C.
 
-Using the DS3231 RTC module provided to us I'll be able to keep track of the current time and date. The user will be able to set the current time, using the inputs on the OLED display, which are first sent to the microcontroller before being sent to the RTC. Too, the RTC will send time data back to the microcontroller, which will be displayed on the OLED. This will be over I2C.
+Using the DS3231 RTC module provided to us I'll be able to keep track of the current time and date. The user will be able to set the current time, using the inputs on the OLED display, which are first sent to the microcontroller before being sent to the RTC. Too, the RTC will send time data back to the microcontroller, which will be displayed on the OLED. This will be over I2C. This module also has a battery slot, so I will use a 3v coincell battery to power both it and the entire system.
 
 Using a simple buzzer, I'll have an alarm capability added to the watch. The microcontroller will keep track of time from the RTC, and, using user input from the OLED display, the microcontroller will be able to set a specific time that the alarm will go off at to alert the user via the buzzer. This will be done via PWM on the pin which will power the buzzer so as not to be excessively loud.
 
@@ -28,8 +28,9 @@ Finally, I will utilize an ESP32 module to poll a weather API. Upon user request
 
 What hardware will you require? Provide a conceptual circuit diagram and/or block diagram to help the reviewers understand your proposal. Be sure to introduce and discuss your figures in the text.
 
-My slaves will be the Adafruit featherwing OLED, the Adafruit PA1010D GPS tracker, Adafruit BME 688 temperature/humidity/pressure module, DS3231 RTC, buzzer, and ESP32.
+I will require the MSP430FR2310, The ESP32, The Adafruit OLED 128X64 Display, the Adafruit AHT20 Temperature/Humidity Module, the Adafruit PA1010D gps module, the DS3231 RTC, and finally the buzzer. It should be noted that the DS3231 RTC has a battery holder, so it will be what supplies the system via a 3 volt coin cell battery.
 
+![Circuit Diagram](Final_Project_Diagram.drawio)
 
 ## Software overview
 
@@ -41,7 +42,7 @@ The MSP430 will be constantly polling each device to gather data from it in a ro
 
 ## Testing Procedure
 
-I plan on demonstrating each feature of my watch. First, I'll demonstrate the main time/date display of the watch, which arguably is the most important. I'll demonstrate the ability of the watch to set the current time (like for daylight saving, new timezone, etc.), the date, and the alarm functionality. Next I'll move on to the climatic data the watch can read, displaying the temperature, humidity, and barometric data, and if necessary moving between rooms or inside/outside to show it changing to local conditions. Finally, I'll demonstrate the forecast capability of the watch, switching between daily and weekly forecasts. This will require me to connect to the school's wifi ahead of time by manually programming the Arduino, as finding a way to implement this into the actual project would be rather difficult and take away from the main point of it, but shouldn't be a problem.
+I plan on demonstrating each feature of my watch. First, I'll demonstrate the main time/date display of the watch, which arguably is the most important. I'll demonstrate the ability of the watch to set the current time (like for daylight saving, new timezone, etc.), the date, and the alarm functionality. Next I'll move on to the climatic data the watch can read, displaying the temperature, and humidity, and if necessary moving between rooms or inside/outside to show it changing to local conditions. Finally, I'll demonstrate the forecast capability of the watch, switching between daily and weekly forecasts. This will require me to connect to the school's wifi ahead of time by manually programming the Arduino, as finding a way to implement this into the actual project would be rather difficult and take away from the main point of it, but shouldn't be a problem.
 
 ## Prescaler
 
@@ -62,12 +63,12 @@ Desired Prescaler level:
 
 **The inputs to the system will be:**
 1.  Adafruit PA1010D GPS sensor; I'll be taking in both current GPS coordinates and altitude
-2.  Adafruit BME 688 temperature/humidity module, inputting raw temperature, humidity, and barometric data to be processed/converted to desired unit
+2.  Adafruit AHT20 temperature/humidity module, inputting raw temperature and humidity data to be processed/converted to desired unit
 3.  DS3231 RTC; Getting current time to the second and will also need to be manually set by the user through OLED I/O to desired time.
 4.  ESP32; Providing data for both daily and weekly forecast that will need to be decoded by the MSP430. This requires some arduino code in order to receive/process
 API data, but is pretty simple and not necessarily the "bare metal" programming this class emphasizes.
 5.  Adafruit OLED display; Contains three buttons and a reset which will be utilized to navigate the basic GUI and modify settings of the watch such as alarm time,
-setting the current time, or getting the forecast online.
+setting the current time, or getting the forecast online, connected to GPIO pins which will connect to the MSP430.
 
 **The outputs of the system will be:**
 1.   Simple Buzzer; somewhat trivial, but will be powered via PWM by the microcontroller when the user's selected time is reached.
@@ -76,12 +77,12 @@ to the user.
 
 **The project objective is**
 
-Create a smart watch which is capable of providing a suite of relevant data to the user. Not only will they get their current time, but they'll be able to see the current temperature, humidity, and barometric data at their current location, as well as be able to get the daily and weekly forecast. I can't promise it will be a necessarily ergonomic fit, but that is for other engineering disciplines.
+Create a smart watch which is capable of providing a suite of relevant data to the user. Not only will they get their current time, but they'll be able to see the current temperature and humidity data at their current location, as well as be able to get the daily and weekly forecast. I can't promise it will be a necessarily ergonomic fit, but that is for other engineering disciplines.
 
 **The new hardware or software modules are:**
 1. AdaFruit OLED 128x64 display - OLED display with 3 input buttons and a reset, displays information provided to and formatted by I2C
 2. Adafruit PA1010D - GPS module which can provide the user's location and altitude over I2C
-3. Adafruit BME 688 temperature/humidity module - Provides temperature, mudifity, and barometric data over I2C
+3. Adafruit AHT20  temperature/humidity module - Provides temperature, and humidity over I2C
 4. ESP32 - Microcontroller with onboard wifi and bluetooth capabilities. In this specific case, I will program it to act as a wifi receiver to get climate forecast data via an API, which it will provide to the MSP430.
 
 
