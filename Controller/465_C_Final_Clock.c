@@ -32,6 +32,7 @@ char clock_square_wave[2] = {CLOCK_SQUARE_REG, 0x00}; // Command to enable the 1
 char *i2c_buffer; // Point to which buffer we are writing to / reading from
 volatile unsigned int i2c_length; // Length of the buffer we are writing to / reading from
 volatile int transmission = 1; // Boolean for indicating an entire tranmission (tx or rx) is complete
+volatile int tick = 0; // Boolean for if the 1hz tick interrupt has fired.
 //---------------- End I2C Variables ----------------
 
 void tx_I2C(int addr, char *buffer, int len){
@@ -79,7 +80,7 @@ int main(void)
 {
     WDTCTL = WDTPW | WDTHOLD;   // stop watchdog timer
 
-    //----------------- Setup UCBO for I2C -----------------
+    //----------------- Setup UCBO & P1 for I2C -----------------
     UCB0CTLW0 |= UCSWRST; // put in software reset
 
     UCB0CTLW0 |= UCSSEL_3; // choose SMCLK
@@ -89,9 +90,7 @@ int main(void)
     UCB0CTLW0 |= UCMST; // Set as master
 
     UCB0CTLW0 &= ~UCSWRST; // take B0 out of SW reset
-    //-----------------END  Setup UCBO for I2C -----------------
 
-    //-- Setup P1
     // Setup P1.3 for SCL
     P1SEL1 &= ~BIT3;
     P1SEL0 |= BIT3;
@@ -99,6 +98,22 @@ int main(void)
     // Setup P1.2 for SDA
     P1SEL1 &= ~BIT2;
     P1SEL0 |= BIT2;
+    //-----------------END  Setup UCBO & P1 for I2C -----------------
+
+    //----------------- Setup P1.1 for input interrupt -----------------
+    // Configure P1.1 for digital I/O
+    P1SEL0 &= ~BIT1;
+    P1SEL1 &= ~BIT1;
+
+    P1DIR &= ~BIT1; // Clear P1.1 Direction = input mode
+    P1REN |= BIT1; // Enable pull up/down resistor
+    P1OUT |= BIT1; // Make resistor a pull up
+
+    P1IES |= BIT1; // Enable high to low sensitivity
+    P1IFG &= ~BIT1; // Clear IFG flag
+    P1IE |= BIT1; // Enable interrupt for P1
+    //----------------- End Setup P1.1 for input interrupt -----------------
+
 
     PM5CTL0 &= ~LOCKLPM5; // Turn on I/0
     __enable_interrupt(); // enable maskables
@@ -108,22 +123,29 @@ int main(void)
     tx_I2C(CLOCK_ADDR, clock_time_init, sizeof(clock_time_init)); // Set initial time
 
     while(1){
-        //rx_I2C(CLOCK_ADDR, clock_current_time, sizeof(clock_current_time), CLOCK_TIME_REG);
+        if(tick){
+            tick = 0;
+            rx_I2C(CLOCK_ADDR, clock_current_time, sizeof(clock_current_time), CLOCK_TIME_REG);
+        }
     }
-
 
     return 0;
 }
 
 //-- ISRs
+#pragma vector = PORT1_VECTOR
+__interrupt void ISR_Port1(void){
+    tick = 1;
+    P1IFG &= ~BIT1;
+}
+
 #pragma vector = EUSCI_B0_VECTOR
 __interrupt void EUSCI_B0_I2C_ISR(void){
-    // ISR for Tx, iterate along packet and send each byte
     static unsigned int index = 0;
 
     switch(__even_in_range(UCB0IV, 0x1E)){
-        case 0x16:
 
+        case 0x16: // RX BUFFER FULL
             if (index == (i2c_length - 2)){
                 UCB0CTLW0 |= UCTXSTP; // Send STOP before reading the last byte
             }
@@ -141,7 +163,7 @@ __interrupt void EUSCI_B0_I2C_ISR(void){
 
             break;
 
-        case 0x18:
+        case 0x18: // TX BUFFER TRANSMITTED
             if (index < i2c_length) {
                 UCB0TXBUF = i2c_buffer[index++];
             } else {
@@ -150,6 +172,7 @@ __interrupt void EUSCI_B0_I2C_ISR(void){
                 transmission = 1;
             }
             break;
+
         default: break;
     }
 }
