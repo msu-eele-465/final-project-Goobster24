@@ -1,4 +1,5 @@
 #include <msp430.h>
+#include <stdint.h>
 
 /////////////////////////////////////////////////////////////////////////////
 ////////////////////////////     Definitions     ////////////////////////////
@@ -101,6 +102,10 @@ char bme_conf_init[2] = {BME_CONF_REG, 0x00}; // Standby = 0.5 ms (irrelevant), 
 
 char bme_raw_out[8]; // RX buffer for querying the BME280.
 
+uint32_t raw_pressure = 0;
+uint32_t raw_temperature = 0;
+uint32_t raw_humidity = 0;
+
 //---------------- End BME280 Variables ----------------
 
 //---------------- I2C Variables ----------------
@@ -155,6 +160,13 @@ void rx_I2C(int addr, char *buffer, int len, char reg){
     UCB0IE &= ~UCRXIE0; // disable RX0 IRQ
 }
 
+void extract_raw_climate(){
+    // Seemingly complicated yet quite elegant bit shift.
+    raw_pressure = ((uint32_t)bme_raw_out[0] << 12) | ((uint32_t)bme_raw_out[1] << 4) | (bme_raw_out[2] >> 4);
+    raw_temperature = ((uint32_t)bme_raw_out[3] << 12) | ((uint32_t)bme_raw_out[4] << 4) | (bme_raw_out[5] >> 4);
+    raw_humidity = ((uint32_t)bme_raw_out[6] << 8) | bme_raw_out[7];
+}
+
 /////////////////////////////////////////////////////////////////////////////
 ////////////////////////////        Main         ////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
@@ -207,7 +219,7 @@ int main(void)
     tx_I2C(CLOCK_ADDR, clock_time_init, sizeof(clock_time_init)); // Set initial time
 
     //BME280 Initialization
-    tx_I2C(BME_ADDR, bme_conf_init, sizeof(bme_comf_init)); // Configurations
+    tx_I2C(BME_ADDR, bme_conf_init, sizeof(bme_conf_init)); // Configurations
 
     tx_I2C(BME_ADDR, bme_hum_init, sizeof(bme_hum_init)); // Set Humidity
 
@@ -226,6 +238,8 @@ int main(void)
             __delay_cycles(160000); // ~10 ms delay for the BME to finish its measurement.
 
             rx_I2C(BME_ADDR, bme_raw_out, sizeof(bme_raw_out), BME_READ_REG); // Get BME climate measurements
+
+            extract_raw_climate(); // Extract climate data from the rx and put into appropriate variables.
         }
     }
 
