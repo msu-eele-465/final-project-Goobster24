@@ -1,9 +1,9 @@
 #include <msp430.h>
 #include <stdint.h>
 
-/////////////////////////////////////////////////////////////////////////////
-////////////////////////////     Definitions     ////////////////////////////
-/////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////     Definitions     ////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------- Clock Definitions ----------------
 #define CLOCK_ADDR 0x68
@@ -11,7 +11,7 @@
 #define CLOCK_TIME_REG 0x00
 #define CLOCK_SQUARE_REG 0x0E
 
-// These can be set at-will to change the initial
+// These can be set at-will to change the initial time
 #define DEF_SEC  0x15
 #define DEF_MIN  0x56
 #define DEF_HOUR 0x13
@@ -29,11 +29,12 @@
 #define BME_CONF_REG 0xF5
 
 #define BME_READ_REG 0xF7
+#define BME_CALI_REG = 0x88;  // Calibration register starting point for dig_T1
 //---------------- End Clock Definitions ----------------
 
-/////////////////////////////////////////////////////////////////////////////
-////////////////////////////      Variables      ////////////////////////////
-/////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////      Variables      ////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------- Clock Variables ----------------
 
@@ -102,22 +103,63 @@ char bme_conf_init[2] = {BME_CONF_REG, 0x00}; // Standby = 0.5 ms (irrelevant), 
 
 char bme_raw_out[8]; // RX buffer for querying the BME280.
 
-uint32_t raw_pressure = 0;
-uint32_t raw_temperature = 0;
-uint32_t raw_humidity = 0;
+volatile int32_t raw_pressure = 0;
+volatile int32_t raw_temperature = 0;
+volatile int32_t raw_humidity = 0;
+
+volatile int32_t temperature_32;
+volatile uint32_t pressure_32;
+volatile uint32_t humidity_32;
+
+volatile float temperature_C = 0;
+volatile float pressure_Pa = 0;
+volatile float humidity_RH = 0;
+
+// CALIBRATION DATA
+// These values are hard-coded into the BME, they need to be read at launch over I2C, and are used to calibrate the measurement.
+// I'm not even going to pretend like I know how they're calculated, what they are, or how they're employed in each calculation.
+// All of this was from Bosch (manufacturer), who basically said don't even try to wrap your head around it.
+
+volatile int32_t tfine = 0;
+
+// Temperature
+volatile uint16_t dig_T1 = 0;
+volatile int16_t  dig_T2 = 0;
+volatile int16_t  dig_T3 = 0;
+
+// Pressure
+volatile uint16_t dig_P1 = 0;
+volatile int16_t  dig_P2 = 0;
+volatile int16_t  dig_P3 = 0;
+volatile int16_t  dig_P4 = 0;
+volatile int16_t  dig_P5 = 0;
+volatile int16_t  dig_P6 = 0;
+volatile int16_t  dig_P7 = 0;
+volatile int16_t  dig_P8 = 0;
+volatile int16_t  dig_P9 = 0;
+
+// Humidity
+volatile uint8_t  dig_H1 = 0;
+volatile int16_t  dig_H2 = 0;
+volatile uint8_t  dig_H3 = 0;
+volatile int16_t  dig_H4 = 0;
+volatile int16_t  dig_H5 = 0;
+volatile int8_t   dig_H6 = 0;
 
 //---------------- End BME280 Variables ----------------
 
 //---------------- I2C Variables ----------------
+
 char *i2c_buffer; // Point to which buffer we are writing to / reading from
 volatile unsigned int i2c_length; // Length of the buffer we are writing to / reading from
 volatile int transmission = 1; // Boolean for indicating an entire tranmission (tx or rx) is complete
 volatile int tick = 0; // Boolean for if the 1hz tick interrupt has fired.
+
 //---------------- End I2C Variables ----------------
 
-/////////////////////////////////////////////////////////////////////////////
-////////////////////////////      Functions      ////////////////////////////
-/////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////      Functions      ////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void tx_I2C(int addr, char *buffer, int len){
     while (!transmission); // Wait until previous transmission is completed
@@ -160,6 +202,115 @@ void rx_I2C(int addr, char *buffer, int len, char reg){
     UCB0IE &= ~UCRXIE0; // disable RX0 IRQ
 }
 
+int32_t compensate_temperature(int32_t raw_temp) {
+    volatile int32_t var1, var2, T;
+
+    // Calculate fine temperature
+    var1 = ((((raw_temp >> 3) - ((int32_t)dig_T1 << 1))) * ((int32_t)dig_T2)) >> 11;
+    var2 = (((((raw_temp >> 4) - ((int32_t)dig_T1)) * ((raw_temp >> 4) - ((int32_t)dig_T1))) >> 12) * ((int32_t)dig_T3)) >> 14;
+    tfine = var1 + var2;
+
+    // Calculate temperature
+    T = (tfine * 5 + 128) >> 8;
+    return T;
+}
+
+uint32_t compensate_pressure(int32_t raw_pressure) {
+    volatile int32_t var4, var5;
+    volatile uint32_t p;
+    var4 = (((int32_t)tfine)>>1) - (int32_t)0xFA00;
+    var5 = (((var4>>2) * (var4>>2)) >> 11 ) * ((int32_t)dig_P6);
+    var5 = var5 + ((var4*((int32_t)dig_P5))<<1);
+    var5 = (var5>>2)+(((int32_t)dig_P4)<<16);
+    var4 = (((dig_P3 * (((var4>>2) * (var4>>2)) >> 13 )) >> 3) + ((((int32_t)dig_P2) * var4)>>1))>>18;
+    var4 = ((((0x8000+var4))*((int32_t)dig_P1))>>15);
+    if (var4 == 0)
+    {
+        return 0; // Avoid exception caused by division by zero
+    }
+    p = (((uint32_t)(((int32_t)0x100000)-raw_pressure)-(var5>>12)))*0xC35;
+    if (p < 0x80000000)
+    {
+        p = (p << 1) / ((uint32_t)var4);
+    }
+    else
+    {
+        p = (p / (uint32_t)var4) * 2;
+    }
+    var4 = (((int32_t)dig_P9) * ((int32_t)(((p>>3) * (p>>3))>>13)))>>12;
+    var5 = (((int32_t)(p>>2)) * ((int32_t)dig_P8))>>13;
+    p = (uint32_t)((int32_t)p + ((var4 + var5 + dig_P7) >> 4));
+    return p;
+}
+
+uint32_t compensate_humidity(int32_t raw_humidity) {
+    volatile int32_t var3;
+    var3 = tfine - (int32_t)76800;
+
+    var3 = ((((((int32_t)raw_humidity << 14) - (((int32_t)dig_H4) << 20) - (((int32_t)dig_H5) * var3)) +
+        ((int32_t)16384)) >> 15) * (((((((var3 * ((int32_t)dig_H6)) >> 10) * (((var3 *
+        ((int32_t)dig_H3)) >> 11) + ((int32_t)32768))) >> 10) + ((int32_t)2097152)) *
+        ((int32_t)dig_H2) + (int32_t)8192) >> 14));
+
+    var3 = (var3 - (((((var3 >> 15) * (var3 >> 15)) >> 7) * ((int32_t)dig_H1)) >> 4));
+
+    if(var3 < 0) var3 = 0;
+    if(var3 > 419430400) var3 = 419430400;
+
+    return (uint32_t)(var3 >> 12);
+}
+
+
+
+void compensate(){
+    temperature_32 = compensate_temperature(raw_temperature);
+    pressure_32 = compensate_pressure(raw_pressure);
+    humidity_32 = compensate_humidity(raw_humidity);
+}
+
+void read_calibration_data(void) {
+    uint8_t addr = 0x88;  // Start address for temperature calibration data
+
+    char temp_pres_calibration[24];
+
+    // Read all the calibration data in one shot (24 bytes starting from 0x88)
+    rx_I2C(BME_ADDR, temp_pres_calibration, sizeof(temp_pres_calibration), addr);
+
+    // Temperature calibration data (first 6 bytes)
+    dig_T1 = (temp_pres_calibration[0] | (temp_pres_calibration[1] << 8));  // Combine bytes to form 16-bit value
+    dig_T2 = (temp_pres_calibration[2] | (temp_pres_calibration[3] << 8));  // Combine bytes to form 16-bit value
+    dig_T3 = (temp_pres_calibration[4] | (temp_pres_calibration[5] << 8));  // Combine bytes to form 16-bit value
+
+    // Pressure calibration data (next 18 bytes)
+    dig_P1 = (temp_pres_calibration[6] | (temp_pres_calibration[7] << 8));  // 16-bit unsigned value
+    dig_P2 = (temp_pres_calibration[8] | (temp_pres_calibration[9] << 8));  // 16-bit signed value
+    dig_P3 = (temp_pres_calibration[10] | (temp_pres_calibration[11] << 8)); // 16-bit signed value
+    dig_P4 = (temp_pres_calibration[12] | (temp_pres_calibration[13] << 8)); // 16-bit signed value
+    dig_P5 = (temp_pres_calibration[14] | (temp_pres_calibration[15] << 8)); // 16-bit signed value
+    dig_P6 = (temp_pres_calibration[16] | (temp_pres_calibration[17] << 8)); // 16-bit signed value
+    dig_P7 = (temp_pres_calibration[18] | (temp_pres_calibration[19] << 8)); // 16-bit signed value
+    dig_P8 = (temp_pres_calibration[20] | (temp_pres_calibration[21] << 8)); // 16-bit signed value
+    dig_P9 = (temp_pres_calibration[22] | (temp_pres_calibration[23] << 8)); // 16-bit signed value
+
+    char humidity_calibration[9];  // We need 9 bytes in total (H1, H2-H6)
+
+    addr = 0xA1;
+    // Read the first 2 bytes, starting at 0xA1 (dig_H1 and extra byte at 0xA2, which is ignored)
+    rx_I2C(BME_ADDR, humidity_calibration, 2, addr);
+
+    // Now read the next 7 bytes from address 0xE1 (dig_H2 to dig_H6)
+    addr = 0xE1;
+    rx_I2C(BME_ADDR, &humidity_calibration[1], 8, addr);  // Read H2-H6
+
+    // Humidity calibration data assignments
+    dig_H1 = humidity_calibration[0];  // Only use the first byte (H1)
+    dig_H2 = (humidity_calibration[1] | (humidity_calibration[2] << 8));  // 16-bit signed value
+    dig_H3 = humidity_calibration[3];  // 8-bit unsigned value
+    dig_H4 = (humidity_calibration[4] << 4 | (humidity_calibration[5] & 0x0F));  // 12-bit signed value
+    dig_H5 = (humidity_calibration[6] << 4 | ((humidity_calibration[7] >> 4) & 0x0F));  // 12-bit signed value
+    dig_H6 = humidity_calibration[8];  // 8-bit signed value
+}
+
 void extract_raw_climate(){
     // Seemingly complicated yet quite elegant bit shift.
     raw_pressure = ((uint32_t)bme_raw_out[0] << 12) | ((uint32_t)bme_raw_out[1] << 4) | (bme_raw_out[2] >> 4);
@@ -167,9 +318,9 @@ void extract_raw_climate(){
     raw_humidity = ((uint32_t)bme_raw_out[6] << 8) | bme_raw_out[7];
 }
 
-/////////////////////////////////////////////////////////////////////////////
-////////////////////////////        Main         ////////////////////////////
-/////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////        Main         ////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 int main(void)
 {
@@ -214,21 +365,19 @@ int main(void)
     __enable_interrupt(); // enable maskables
 
     // Clock Initialization
-    //tx_I2C(CLOCK_ADDR, clock_square_wave, sizeof(clock_square_wave)); // Enable 1hz square wave on the DS321
+    tx_I2C(CLOCK_ADDR, clock_square_wave, sizeof(clock_square_wave)); // Enable 1hz square wave on the DS321
 
     tx_I2C(CLOCK_ADDR, clock_time_init, sizeof(clock_time_init)); // Set initial time
 
     //BME280 Initialization
+    read_calibration_data();
+
     tx_I2C(BME_ADDR, bme_conf_init, sizeof(bme_conf_init)); // Configurations
 
     tx_I2C(BME_ADDR, bme_hum_init, sizeof(bme_hum_init)); // Set Humidity
 
-    //tx_I2C(BME_ADDR, bme_meas_init, sizeof(bme_meas_init)); Starts measurements from the BME, so I'll save this for the loop
-
-    // Send over all the config stuff for the BME280
-
     while(1){
-        if(tick && transmission){
+        if(tick){
             tick = 0;
 
             //rx_I2C(CLOCK_ADDR, clock_current_time, sizeof(clock_current_time), CLOCK_TIME_REG); // Get the time
@@ -240,15 +389,17 @@ int main(void)
             rx_I2C(BME_ADDR, bme_raw_out, sizeof(bme_raw_out), BME_READ_REG); // Get BME climate measurements
 
             extract_raw_climate(); // Extract climate data from the rx and put into appropriate variables.
+
+            compensate(); //Compensate each measurement and assign to appropriate variable.
         }
     }
 
     return 0;
 }
 
-/////////////////////////////////////////////////////////////////////////////
-////////////////////////////     Interrupts      ////////////////////////////
-/////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////     Interrupts      ////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #pragma vector = PORT1_VECTOR
 __interrupt void ISR_Port1(void){
@@ -263,7 +414,7 @@ __interrupt void EUSCI_B0_I2C_ISR(void){
     switch(__even_in_range(UCB0IV, 0x1E)){
 
         case 0x16: // RX BUFFER FULL
-            if (index == (i2c_length - 2)){
+            if ((index == (i2c_length - 2))){
                 UCB0CTLW0 |= UCTXSTP; // Send STOP before reading the last byte
             }
 
