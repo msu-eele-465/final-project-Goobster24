@@ -1,5 +1,6 @@
 #include <msp430.h>
 #include <stdint.h>
+#include <stdio.h>
 #include "font.h"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -53,7 +54,7 @@
 #define OLED_EXTERNALVCC            0x1
 #define OLED_SWITCHCAPVCC           0x2
 
-#define OLED_DEACTIVATE_SCROLL   0x2E
+#define OLED_DEACTIVATE_SCROLL      0x2E
 //---------------- END OLED Definitions ----------------
 
 //---------------- Clock Definitions ----------------
@@ -70,6 +71,15 @@
 #define DEF_DOM  0x28
 #define DEF_MON  0x04
 #define DEF_YEAR 0x25
+
+// Used to get index in clock_Current_time array for each measurement
+#define SECONDS 0
+#define MINUTES 1
+#define HOURS   2
+#define DAY     3
+#define DOM     4
+#define MONTH   5
+#define YEAR    6
 //---------------- End Clock Definitions ----------------
 
 //---------------- BME280 Definitions ----------------
@@ -166,10 +176,6 @@ volatile int32_t raw_humidity = 0;
 volatile int32_t temperature_32;
 volatile uint32_t pressure_32;
 volatile uint32_t humidity_32;
-
-volatile float temperature_C = 0;
-volatile float pressure_Pa = 0;
-volatile float humidity_RH = 0;
 
 // CALIBRATION DATA
 // These values are hard-coded into the BME, they need to be read at launch over I2C, and are used to calibrate the measurement.
@@ -491,6 +497,65 @@ void OLED_draw_text(uint8_t column, uint8_t page, const char *text) {
     }
 }
 
+void format_time(char *buf, const char *time_regs) {
+    uint8_t hr   = time_regs[HOURS] & 0x3F;   // mask for 24-hour mode
+    uint8_t min  = time_regs[MINUTES] & 0x7F;
+    uint8_t sec  = time_regs[SECONDS] & 0x7F;
+
+    // Convert BCD to binary
+    hr  = ((hr  >> 4) * 10) + (hr  & 0x0F);
+    min = ((min >> 4) * 10) + (min & 0x0F);
+    sec = ((sec >> 4) * 10) + (sec & 0x0F);
+
+    buf[0] = (hr / 10) + '0';
+    buf[1] = (hr % 10) + '0';
+    buf[2] = ':';
+    buf[3] = (min / 10) + '0';
+    buf[4] = (min % 10) + '0';
+    buf[5] = ':';
+    buf[6] = (sec / 10) + '0';
+    buf[7] = (sec % 10) + '0';
+    buf[8] = '\0';
+}
+
+void format_climate_line(char *buf, int32_t temp32, uint32_t rh32, uint32_t pres32) {
+    // Convert fixed-point raw values to displayable components
+    int temp_int = temp32 / 100;
+    int temp_dec = (temp32 % 100) / 10;
+
+    int rh_int = rh32 / 1024;
+    int rh_dec = ((rh32 % 1024) * 10) / 1024;
+
+    int pres_hpa = pres32 / 100;
+
+    // Format: 22.5C 43.1RH% 1013hPa (21 characters max)
+    int i = 0;
+    buf[i++] = (temp_int / 10) + '0';
+    buf[i++] = (temp_int % 10) + '0';
+    buf[i++] = '.';
+    buf[i++] = temp_dec + '0';
+    buf[i++] = 'C';
+    buf[i++] = ' ';
+
+    buf[i++] = (rh_int / 10) + '0';
+    buf[i++] = (rh_int % 10) + '0';
+    buf[i++] = '.';
+    buf[i++] = rh_dec + '0';
+    buf[i++] = 'R';
+    buf[i++] = 'H';
+    buf[i++] = '%';
+    buf[i++] = ' ';
+
+    buf[i++] = (pres_hpa / 1000) % 10 + '0';
+    buf[i++] = (pres_hpa / 100) % 10 + '0';
+    buf[i++] = (pres_hpa / 10) % 10 + '0';
+    buf[i++] = pres_hpa % 10 + '0';
+    buf[i++] = 'h';
+    buf[i++] = 'P';
+    buf[i++] = 'a';
+    buf[i] = '\0';
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////        Main         ////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -541,34 +606,24 @@ int main(void)
     OLED_init();
 
     // Clock Initialization
-    //tx_I2C(CLOCK_ADDR, clock_square_wave, sizeof(clock_square_wave)); // Enable 1hz square wave on the DS321
+    tx_I2C(CLOCK_ADDR, clock_square_wave, sizeof(clock_square_wave)); // Enable 1hz square wave on the DS321
 
-    //tx_I2C(CLOCK_ADDR, clock_time_init, sizeof(clock_time_init)); // Set initial time
+    tx_I2C(CLOCK_ADDR, clock_time_init, sizeof(clock_time_init)); // Set initial time
 
     //BME280 Initialization
-    //read_calibration_data();
+    read_calibration_data();
 
-    //tx_I2C(BME_ADDR, bme_conf_init, sizeof(bme_conf_init)); // Configurations
+    tx_I2C(BME_ADDR, bme_conf_init, sizeof(bme_conf_init)); // Configurations
 
-    //tx_I2C(BME_ADDR, bme_hum_init, sizeof(bme_hum_init)); // Set Humidity
+    tx_I2C(BME_ADDR, bme_hum_init, sizeof(bme_hum_init)); // Set Humidity
 
     OLED_clear_display();
-
-    OLED_draw_text(0, 0, "I'm on that good");
-
-    OLED_draw_text(0, 1, "kush and alcohol.");
-
-    OLED_draw_text(0, 2, "I got some down");
-
-    OLED_draw_text(0, 3, "bitches I can call.");
-
-    while(1){}
 
     while(1){
         if(tick){
             tick = 0;
 
-            //rx_I2C(CLOCK_ADDR, clock_current_time, sizeof(clock_current_time), CLOCK_TIME_REG); // Get the time
+            rx_I2C(CLOCK_ADDR, clock_current_time, sizeof(clock_current_time), CLOCK_TIME_REG); // Get the time
 
             tx_I2C(BME_ADDR, bme_meas_init, sizeof(bme_meas_init)); // Sets pressure/temp oversampling and starts measurements
 
@@ -579,6 +634,16 @@ int main(void)
             extract_raw_climate(); // Extract climate data from the rx and put into appropriate variables.
 
             compensate(); //Compensate each measurement and assign to appropriate variable.
+
+            char time_str[9];       // HH:MM:SS
+            char climate_line[24];  // xx.xC xx.x% xxxxhPa
+
+            format_time(time_str, clock_current_time);
+            format_climate_line(climate_line, temperature_32, humidity_32, pressure_32);
+
+            OLED_draw_text(0, 0, time_str);
+
+            OLED_draw_text(0, 3, climate_line);
         }
     }
 
