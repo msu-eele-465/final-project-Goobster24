@@ -556,6 +556,45 @@ void format_climate_line(char *buf, int32_t temp32, uint32_t rh32, uint32_t pres
     buf[i] = '\0';
 }
 
+uint8_t bcd_to_dec(uint8_t val) {
+    return ((val >> 4) * 10) + (val & 0x0F);
+}
+
+void format_day(char *buf, uint8_t day_bcd) {
+    static const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    uint8_t day_index = bcd_to_dec(day_bcd) - 1;
+
+    if (day_index < 7) {
+        buf[0] = days[day_index][0];
+        buf[1] = days[day_index][1];
+        buf[2] = days[day_index][2];
+        buf[3] = '\0';
+    } else {
+        buf[0] = '?';
+        buf[1] = '?';
+        buf[2] = '?';
+        buf[3] = '\0';
+    }
+}
+
+void format_date(char *buf, uint8_t month_bcd, uint8_t date_bcd, uint8_t year_bcd) {
+    uint8_t mm = bcd_to_dec(month_bcd);
+    uint8_t dd = bcd_to_dec(date_bcd);
+    uint8_t yy = bcd_to_dec(year_bcd);
+
+    buf[0] = '0' + (mm / 10);
+    buf[1] = '0' + (mm % 10);
+    buf[2] = '/';
+    buf[3] = '0' + (dd / 10);
+    buf[4] = '0' + (dd % 10);
+    buf[5] = '/';
+    buf[6] = '0' + (yy / 10);
+    buf[7] = '0' + (yy % 10);
+    buf[8] = '\0';
+}
+
+
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////        Main         ////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -608,7 +647,7 @@ int main(void)
     // Clock Initialization
     tx_I2C(CLOCK_ADDR, clock_square_wave, sizeof(clock_square_wave)); // Enable 1hz square wave on the DS321
 
-    tx_I2C(CLOCK_ADDR, clock_time_init, sizeof(clock_time_init)); // Set initial time
+    //tx_I2C(CLOCK_ADDR, clock_time_init, sizeof(clock_time_init)); // Set initial time
 
     //BME280 Initialization
     read_calibration_data();
@@ -637,12 +676,17 @@ int main(void)
 
             char time_str[9];       // HH:MM:SS
             char climate_line[24];  // xx.xC xx.x% xxxxhPa
+            char day_str[4];     // "Tue"
+            char date_str[9];    // "05/07/25"
 
             format_time(time_str, clock_current_time);
             format_climate_line(climate_line, temperature_32, humidity_32, pressure_32);
+            format_day(day_str, clock_current_time[DAY]);
+            format_date(date_str, clock_current_time[MONTH], clock_current_time[DOM], clock_current_time[YEAR]);
 
             OLED_draw_text(0, 0, time_str);
-
+            OLED_draw_text(0, 1, day_str);       // Display day
+            OLED_draw_text(32, 1, date_str);     // Display MM/DD/YY
             OLED_draw_text(0, 3, climate_line);
         }
     }
