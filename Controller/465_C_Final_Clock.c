@@ -1,9 +1,60 @@
 #include <msp430.h>
 #include <stdint.h>
+#include "font.h"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////     Definitions     ////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//---------------- OLED Definitions ----------------
+// Extraordinarily convoluted, I based this off the Adafruit library.
+
+#define OLED_ADDR                   0x3C
+#define OLED_CMD                    0x80  // Control byte for commands
+#define OLED_DATA                   0x40  // Control byte for data
+
+#define OLED_LCDWIDTH               128   // In pixels (Screen is 128 x 32)
+#define OLED_LCDHEIGHT              32
+
+#define OLED_SETCONTRAST            0x81
+#define OLED_DISPLAYALLON_RESUME    0xA4
+#define OLED_DISPLAYALLON           0xA5
+#define OLED_NORMALDISPLAY          0xA6
+#define OLED_INVERTDISPLAY          0xA7
+#define OLED_DISPLAYOFF             0xAE
+#define OLED_DISPLAYON              0xAF
+
+#define OLED_SETDISPLAYOFFSET       0xD3
+#define OLED_SETCOMPINS             0xDA
+
+#define OLED_SETVCOMDETECT          0xDB
+
+#define OLED_SETDISPLAYCLOCKDIV     0xD5
+#define OLED_SETPRECHARGE           0xD9
+
+#define OLED_SETMULTIPLEX           0xA8
+
+#define OLED_SETLOWCOLUMN           0x00
+#define OLED_SETHIGHCOLUMN          0x10
+
+#define OLED_SETSTARTLINE           0x40
+
+#define OLED_MEMORYMODE             0x20
+#define OLED_COLUMNADDR             0x21
+#define OLED_PAGEADDR               0x22
+
+#define OLED_COMSCANINC             0xC0
+#define OLED_COMSCANDEC             0xC8
+
+#define OLED_SEGREMAP               0xA0
+
+#define OLED_CHARGEPUMP             0x8D
+
+#define OLED_EXTERNALVCC            0x1
+#define OLED_SWITCHCAPVCC           0x2
+
+#define OLED_DEACTIVATE_SCROLL   0x2E
+//---------------- END OLED Definitions ----------------
 
 //---------------- Clock Definitions ----------------
 #define CLOCK_ADDR 0x68
@@ -35,6 +86,11 @@
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////      Variables      ////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//---------------- OLED Variables ----------------
+
+//---------------- End OLED Variables ----------------
+char oled_command_buf[17]; // Buffer for I2C TX OLED Commands. No need for RX thankfully.
 
 //---------------- Clock Variables ----------------
 
@@ -260,8 +316,6 @@ uint32_t compensate_humidity(int32_t raw_humidity) {
     return (uint32_t)(var3 >> 12);
 }
 
-
-
 void compensate(){
     temperature_32 = compensate_temperature(raw_temperature);
     pressure_32 = compensate_pressure(raw_pressure);
@@ -318,6 +372,125 @@ void extract_raw_climate(){
     raw_humidity = ((uint32_t)bme_raw_out[6] << 8) | bme_raw_out[7];
 }
 
+void OLED_command(unsigned char command) {
+    oled_command_buf[0] = OLED_CMD;
+    oled_command_buf[1] = command;
+
+    tx_I2C(OLED_ADDR, oled_command_buf, 2);
+}
+
+void OLED_init(void) {
+    // OLED init sequence
+    OLED_command(OLED_DISPLAYOFF);                                // 0xAE
+    OLED_command(OLED_SETDISPLAYCLOCKDIV);                        // 0xD5
+    OLED_command(0x80);                                              // the suggested ratio 0x80
+
+    OLED_command(OLED_SETMULTIPLEX);                              // 0xA8
+    OLED_command(OLED_LCDHEIGHT - 1);
+
+    OLED_command(OLED_SETDISPLAYOFFSET);                          // 0xD3
+    OLED_command(0x0);                                               // no offset
+    OLED_command(OLED_SETSTARTLINE | 0x0);                        // line #0
+    OLED_command(OLED_CHARGEPUMP);                                // 0x8D
+    OLED_command(0x14);                                              // generate high voltage from 3.3v line internally
+    OLED_command(OLED_MEMORYMODE);                                // 0x20
+    OLED_command(0x02);
+    OLED_command(OLED_SEGREMAP | 0x1);
+    OLED_command(OLED_COMSCANDEC);
+
+    OLED_command(OLED_SETCOMPINS);                                // 0xDA
+    OLED_command(0x02);
+    OLED_command(OLED_SETCONTRAST);                               // 0x81
+    OLED_command(0xCF);
+
+    OLED_command(OLED_SETPRECHARGE);                              // 0xd9
+    OLED_command(0xF1);
+    OLED_command(OLED_SETVCOMDETECT);                             // 0xDB
+    OLED_command(0x40);
+    OLED_command(OLED_DISPLAYALLON_RESUME);                       // 0xA4
+    OLED_command(OLED_NORMALDISPLAY);                             // 0xA6
+
+    OLED_command(OLED_DEACTIVATE_SCROLL);
+
+    OLED_command(OLED_DISPLAYON);                                 //--turn on oled panel
+}
+
+void OLED_set_position(uint8_t column, uint8_t page) {
+    OLED_command(OLED_COLUMNADDR);      // Command to set column address
+    OLED_command(column);               // Column start address (0–127)
+    OLED_command(OLED_LCDWIDTH - 1);    // Column end address (127)
+
+    OLED_command(OLED_PAGEADDR);        // Command to set page address
+    OLED_command(page);                 // Page start address (0–3)
+    OLED_command(page);                 // Page end address
+}
+
+void OLED_clear_display(void) {
+
+    uint8_t page;
+    for (page = 0; page < 4; page++) {  // SSD1306 128x32 has 4 pages
+        OLED_set_position(0, page);  // Start of each page
+
+        oled_command_buf[0] = OLED_DATA;  // Data control byte
+
+        // Fill rest of buffer with 0xFF to turn all pixels ON for testing
+        int i;
+        for (i = 1; i < 17; i++) {
+            oled_command_buf[i] = 0x00;
+        }
+
+        uint8_t col;
+        for (col = 0; col < 128; col += 16) {
+            tx_I2C(OLED_ADDR, oled_command_buf, 17);  // 16 bytes of data
+        }
+    }
+}
+
+void OLED_draw_text(uint8_t column, uint8_t page, const char *text) {
+    uint8_t i, j;
+    uint8_t c;
+
+    OLED_set_position(column, page);  // Set starting location
+
+    oled_command_buf[0] = OLED_DATA;  // First byte always control byte for data
+    i = 1;  // Index into oled_command_buf — starting at 1 because 0 is control byte
+
+    while (*text && column < (OLED_LCDWIDTH - 6)) {
+        c = *text++;  // Read next character from string
+
+        // Basic ASCII range check (font_5x7 starts at ASCII 32 — space)
+        if (c < 32 || c > 127) {
+            c = '?';  // Use '?' as fallback for unsupported chars
+        }
+
+        // Copy 5 bytes of the character glyph
+        for (j = 0; j < 5; j++) {
+            oled_command_buf[i++] = font_5x7[c - 32][j];
+            column++;
+
+            // If we filled the buffer (16 bytes of data max), send it
+            if (i == 17) {
+                tx_I2C(OLED_ADDR, oled_command_buf, 17);
+                i = 1;  // Reset to start new data payload
+            }
+        }
+
+        // Add 1-pixel space between characters
+        oled_command_buf[i++] = 0x00;
+        column++;
+
+        if (i == 17) {
+            tx_I2C(OLED_ADDR, oled_command_buf, 17);
+            i = 1;
+        }
+    }
+
+    // Send any remaining bytes in the buffer
+    if (i > 1) {
+        tx_I2C(OLED_ADDR, oled_command_buf, i);
+    }
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////        Main         ////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -364,17 +537,32 @@ int main(void)
     PM5CTL0 &= ~LOCKLPM5; // Turn on I/0
     __enable_interrupt(); // enable maskables
 
-    // Clock Initialization
-    tx_I2C(CLOCK_ADDR, clock_square_wave, sizeof(clock_square_wave)); // Enable 1hz square wave on the DS321
+    // OLED Initialization
+    OLED_init();
 
-    tx_I2C(CLOCK_ADDR, clock_time_init, sizeof(clock_time_init)); // Set initial time
+    // Clock Initialization
+    //tx_I2C(CLOCK_ADDR, clock_square_wave, sizeof(clock_square_wave)); // Enable 1hz square wave on the DS321
+
+    //tx_I2C(CLOCK_ADDR, clock_time_init, sizeof(clock_time_init)); // Set initial time
 
     //BME280 Initialization
-    read_calibration_data();
+    //read_calibration_data();
 
-    tx_I2C(BME_ADDR, bme_conf_init, sizeof(bme_conf_init)); // Configurations
+    //tx_I2C(BME_ADDR, bme_conf_init, sizeof(bme_conf_init)); // Configurations
 
-    tx_I2C(BME_ADDR, bme_hum_init, sizeof(bme_hum_init)); // Set Humidity
+    //tx_I2C(BME_ADDR, bme_hum_init, sizeof(bme_hum_init)); // Set Humidity
+
+    OLED_clear_display();
+
+    OLED_draw_text(0, 0, "I'm on that good");
+
+    OLED_draw_text(0, 1, "kush and alcohol.");
+
+    OLED_draw_text(0, 2, "I got some down");
+
+    OLED_draw_text(0, 3, "bitches I can call.");
+
+    while(1){}
 
     while(1){
         if(tick){
